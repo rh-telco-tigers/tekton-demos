@@ -1,0 +1,82 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: build-and-deploy-spring-app
+spec:
+  workspaces:
+  - name: shared-workspace
+  - name: maven-settings
+  params:
+  - name: deployment-name
+    type: string
+    description: name of the deployment to be patched
+    default: "rest-http-example"
+  - name: git-url
+    type: string
+    description: url of the git repo for the code of deployment
+    default: "https://github.com/snowdrop/rest-http-example"
+  - name: git-revision
+    type: string
+    description: revision to be used from repo of the code for deployment
+    default: "2.3.4-2-redhat"
+  - name: IMAGE
+    type: string
+    description: image to be build from the code
+    default: "image-registry.openshift-image-registry.svc:5000/tekton-spring-dev/rest-http-example"
+  tasks:
+
+  - name: fetch-repository
+    taskRef:
+      name: git-clone
+      kind: ClusterTask
+    workspaces:
+    - name: output
+      workspace: shared-workspace
+    params:
+    - name: url
+      value: $(params.git-url)
+    - name: subdirectory
+      value: ""
+    - name: deleteExisting
+      value: "true"
+    - name: revision
+      value: $(params.git-revision)
+
+  - name: run-maven-goals
+    taskRef:
+      name: maven
+      kind: ClusterTask
+    params:
+    - name: GOALS
+      value:
+        - validate
+        - test
+        - package
+    workspaces:
+    - name: source
+      workspace: shared-workspace
+    - name: maven-settings
+      workspace: maven-settings
+    runAfter:
+    - fetch-repository
+
+  - name: build-image
+    taskRef:
+      name: s2i-java-11
+      kind: ClusterTask
+    params:
+    - name: TLSVERIFY
+      value: "false"
+    - name: IMAGE
+      value: $(params.IMAGE)
+    workspaces:
+    - name: source
+      workspace: shared-workspace
+    runAfter:
+    - run-maven-goals
+
+  - name: deploy-rest-http-example
+    taskRef:
+      name: deploy-rest-http-example
+    runAfter:
+    - build-image
